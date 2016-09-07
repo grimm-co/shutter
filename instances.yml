@@ -1,0 +1,12 @@
+- a_friendly_name:
+    instanceName: test_server_1
+    frequency: monthly
+    historySize: 3
+    dayOfWeek: 4
+    deleteOldSnapshots: yes
+
+- another_name:
+    instanceId: i-dadbeef
+    frequency: monthly
+    dayOfMonth: 12
+
