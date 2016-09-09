@@ -1,12 +1,12 @@
 - a_friendly_name:
-    instanceName: test_server_1
+    instanceName: billing
     frequency: monthly
     historySize: 3
     dayOfWeek: 4
     deleteOldSnapshots: yes
 
 - another_name:
-    instanceId: i-dadbeef
+    instanceId: i-5cee44c5
+    historySize: 1
     frequency: monthly
     dayOfMonth: 12
-

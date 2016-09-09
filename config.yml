@@ -5,4 +5,4 @@ DefaultHistorySize: 2
 DefaultTime: 02:00
 DefaultDayOfWeek: 0
 DefaultDayOfMonth: 10
-DeleteOldSnapshots: no
+DefaultDeleteOldSnapshots: no

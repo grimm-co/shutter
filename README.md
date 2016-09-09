@@ -6,13 +6,13 @@ Configuration options:
 | Option             | Description                                                    | Valid values or types                  |
 | ------             | -----------                                                    | ---------------------                  |
 | DefaultAWSRegion   | The default region to look for the instance in                 | See [here](http://docs.aws.amazon.com/general/latest/gr/rande.html) |
-| DefaultAWSProfile  | The default AWS credential profile for the default region      | User defined via ~/aws/config & credentials |
+| AWSProfile         | The AWS credential profile to use                              | User defined via ~/aws/config & credentials |
 | DefaultFrequency   | The default frequency at which instances are snapshotted       | daily, weekly, monthly                 |
 | DefaultHistorySize | The number of snapshots to keep before deleting the oldest one | integer                                |
 | DefaultTime        | The time of day to snapshot VMs                                | time in 24-hour clock format           |
 | DefaultDayOfWeek   | The day of the week to take weekly snapshots                   | 0-6 (Sunday-Saturday)                  |
 | DefaultDayOfMonth  | The day of the month to take monthly snapshots                 | 0-28 for simplicity                    |
-| DeleteOldSnapshots | Debug option for whether to delete old snapshots or not        | boolean                                |
+| DefaultDeleteOldSnapshots | Debug option for whether to delete old snapshots or not        | boolean                                |
 
 These configuration options are set in [config.yml](config.yml)
 
