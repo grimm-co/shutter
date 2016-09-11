@@ -2,11 +2,9 @@
     instanceName: billing
     frequency: monthly
     historySize: 3
-    dayOfWeek: 4
     deleteOldSnapshots: yes
 
 - another_name:
     instanceId: i-5cee44c5
     historySize: 1
     frequency: monthly
-    dayOfMonth: 12

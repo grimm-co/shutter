@@ -2,7 +2,4 @@ DefaultAWSRegion: us-east-1
 DefaultAWSProfile: shutter
 DefaultFrequency: weekly
 DefaultHistorySize: 2
-DefaultTime: 02:00
-DefaultDayOfWeek: 0
-DefaultDayOfMonth: 10
 DefaultDeleteOldSnapshots: no

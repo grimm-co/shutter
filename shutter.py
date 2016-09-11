@@ -3,6 +3,9 @@ import yaml
 import boto3
 from os import path
 from collections import defaultdict
+from datetime import datetime
+from dateutil.relativedelta import relativedelta
+
 
 # TODO: add logging config to config.yml
 logging.basicConfig(level=logging.DEBUG,
@@ -76,26 +79,72 @@ class Shutter(object):
         ))
         return q[0] if len(q) else None
 
-    def getDriveSnapshots(self, device):
-        return list(device.snapshots.filter(
-            Filters=[
-                {"Name": "status",
-                 "Values": ["completed"]}
-            ]
-        ))
+    def getDriveSnapshots(self, device, status=None):
+        if status:
+            return list(device.snapshots.filter(
+                Filters=[
+                    {"Name": "status",
+                     "Values": [status]}
+                ]
+            ))
+        else:
+            return list(device.snapshots.all())
 
-    def getInstanceRootVolumeSnapshots(self, instance):
-        return self.getDriveSnapshots(self.getRootDevice(instance))
+    def getInstanceRootVolumeSnapshots(self, instance, shutter_only=False):
+        s = self.getDriveSnapshots(self.getRootDevice(instance))
+        if shutter_only:
+            s = [i for i in s if "Shutter" in i.description]
+        s.sort(key=lambda i: i.meta.data["StartTime"])
+        return s
 
     def pruneSnapshots(self, instance):
-        snapshots = self.getInstanceRootVolumeSnapshots(instance['instance'])
-        snapshots.sort(key=lambda i: i.meta.data['StartTime'])
-        histsize = instance["historySize"] if instance['historySize'] else  self.config['DefaultHistorySize']
+        snapshots = self.getInstanceRootVolumeSnapshots(instance["instance"], True)
+        histsize = instance["historySize"] if instance["historySize"] else self.config['DefaultHistorySize']
         if len(snapshots) > histsize:
             to_delete = snapshots[:histsize]
             for snap in to_delete:
                 snap.delete()
 
+    def run(self):
+        for i in self.instances:
+            self.runOne(i)
+
+    def runOne(self, instance):
+        self.snapshotInstanceWithFrequency(instance)
+        prune = instance["deleteOldSnapshots"] if instance["deleteOldSnapshots"] else self.config["DefaultDeleteOldSnapshots"]
+        if prune:
+            self.pruneSnapshots(instance)
+
+    def snapshotInstance(self, instance):
+        inst = instance['instance']
+        name = [i["Value"] for i in inst.tags if i["Key"] == "Name"][0]
+        desc = "Shutter automatically managed snapshot of {} ({})".format(name, inst.id)
+        self.getRootDevice(inst).create_snapshot(Description=desc)
+
+    def snapshotInstanceWithFrequency(self, instance):
+        freq = instance["frequency"] if instance['frequency'] else self.config['DefaultFrequency']
+        histsize = instance["historySize"] if instance["historySize"] else self.config['DefaultHistorySize']
+        snaps = self.getInstanceRootVolumeSnapshots(instance['instance'], True)
+        name = [i["Value"] for i in instance['instance'].tags if i["Key"] == "Name"][0]
+
+        if len(snaps):
+            latest = snaps[0]
+        elif histsize:
+            self.snapshotInstance(instance)
+            return
+
+        bt = latest.meta.data['StartTime']
+        if freq == 'daily':
+            bt += relativedelta(days=1)
+        if freq == 'weekly':
+            bt += relativedelta(weeks=1)
+        if freq == 'monthly':
+            bt += relativedelta(months=1)
+
+        if datetime.now().replace(tzinfo=bt.tzinfo) >= bt+relativedelta(minutes=-10):
+            self.snapshotInstance(instance)
+        else:
+            log.debug("Not snaphotting {} ({}) last snapshot too new with frequency {}".format(name, instance['instance'].id, freq))
 
     def getInstanceById(self, id, region):
         self.initRegion(region)
