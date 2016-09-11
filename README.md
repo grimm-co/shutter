@@ -16,3 +16,5 @@ Configuration options:
 These configuration options are set in [config.yml](config.yml)
 
 Hosts are defined in instances are set in instances.yml. Check out the example [instances.yml](instances.yml) for details.
+
+Developed with love by Jaime Geiger (@wumb0)
