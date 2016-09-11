@@ -3,6 +3,7 @@ shutter
 Automatic snapshot manager for EC2.
 
 Configuration options:
+
 | Option                    | Description                                                    | Valid values or types                       |
 | ------                    | -----------                                                    | ---------------------                       |
 | DefaultAWSRegion          | The default region to look for the instance in                 | See [here](http://docs.aws.amazon.com/general/latest/gr/rande.html) |
