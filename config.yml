@@ -3,3 +3,4 @@ DefaultAWSProfile: shutter
 DefaultFrequency: weekly
 DefaultHistorySize: 2
 DefaultDeleteOldSnapshots: no
+LogLevel: error

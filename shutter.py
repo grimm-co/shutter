@@ -7,8 +7,7 @@ from datetime import datetime
 from dateutil.relativedelta import relativedelta
 
 
-# TODO: add logging config to config.yml
-logging.basicConfig(level=logging.DEBUG,
+logging.basicConfig(level=logging.INFO, filename="shutter.log",
                     format="%(asctime)s - %(name)s [%(levelname)s] - %(message)s",
                     datefmt='%m/%d/%Y %H:%M:%S')
 
@@ -22,6 +21,11 @@ class Shutter(object):
 
     def __init__(self, config_file='config.yml', instance_file='instances.yml'):
         self.loadConfig(config_file)
+        loglevel = getattr(logging, self.config.get("LogLevel", "INFO").upper())
+        if isinstance(loglevel, int):
+            log.setLevel(loglevel)
+        else:
+            log.error("LogLevel config option ({}) is invalid, defaulting to INFO".format(self.config.get("LogLevel")))
         default_region = self.config.get("DefaultAWSRegion")
         self.profile = self.config.get("DefaultAWSProfile", "default")
         self.initRegion(default_region)
