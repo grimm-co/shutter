@@ -11,6 +11,7 @@ Configuration options:
 | DefaultFrequency          | The default frequency at which instances are snapshotted       | daily, weekly, monthly                      |
 | DefaultHistorySize        | The number of snapshots to keep before deleting the oldest one | integer                                     |
 | DefaultDeleteOldSnapshots | Debug option for whether to delete old snapshots or not        | boolean                                     |
+| DefaultRootDevice         | The default root device name. Usually /dev/sda1                | string                                      |
 | LogLevel                  | The Logger log level to log to shutter.log with                | debug, error, info, critical, warning. Case insensitive |
 
 These configuration options are set in [config.yml](config.yml)

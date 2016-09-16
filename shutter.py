@@ -6,6 +6,12 @@ from collections import defaultdict
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
 
+logging.basicConfig(level=logging.INFO, filename="shutter.log",
+		    format="%(asctime)s - %(name)s [%(levelname)s] - %(message)s",
+		    datefmt='%m/%d/%Y %H:%M:%S')
+
+log = logging.getLogger(__name__)
+
 
 class Shutter(object):
     """
@@ -18,12 +24,6 @@ class Shutter(object):
     :param instance_file: the path to the instance file if different than config.yml
     """
     def __init__(self, config_file='config.yml', instance_file='instances.yml'):
-        logging.basicConfig(level=logging.INFO, filename="shutter.log",
-                            format="%(asctime)s - %(name)s [%(levelname)s] - %(message)s",
-                            datefmt='%m/%d/%Y %H:%M:%S')
-
-        log = logging.getLogger(__name__)
-
         self.ec2 = dict()
         self.loadConfig(config_file)
 
@@ -168,7 +168,8 @@ class Shutter(object):
         :rtype: list
         :return: list of snapshots for the root volume of the given EC2 instance
         """
-        s = self.getDriveSnapshots(self.getRootDevice(instance))
+        devname = instance['rootDevice'] if instance['rootDevice'] else self.config.get("DefaultRootDevice")
+        s = self.getDriveSnapshots(self.getRootDevice(instance['instance'], devname))
         if shutter_only:
             s = [i for i in s if "Shutter" in i.description]
         s.sort(key=lambda i: i.meta.data["StartTime"])
@@ -182,7 +183,7 @@ class Shutter(object):
         :type instance: ec2.Instance
         :param instance: The EC2 instance to prune the snapshots of
         """
-        snapshots = self.getInstanceRootVolumeSnapshots(instance["instance"], True)
+        snapshots = self.getInstanceRootVolumeSnapshots(instance, True)
         histsize = instance["historySize"] if instance["historySize"] else self.config['DefaultHistorySize']
         if len(snapshots) > histsize:
             to_delete = snapshots[:histsize]
@@ -220,9 +221,10 @@ class Shutter(object):
                          from the instances file
         """
         inst = instance['instance']
+        devname = instance['rootDevice'] if instance['rootDevice'] else self.config.get("DefaultRootDevice")
         name = [i["Value"] for i in inst.tags if i["Key"] == "Name"][0]
         desc = "Shutter automatically managed snapshot of {} ({})".format(name, inst.id)
-        self.getRootDevice(inst).create_snapshot(Description=desc)
+        self.getRootDevice(inst, devname).create_snapshot(Description=desc)
 
     def snapshotInstanceWithFrequency(self, instance):
         """
@@ -235,7 +237,7 @@ class Shutter(object):
         """
         freq = instance["frequency"] if instance['frequency'] else self.config['DefaultFrequency']
         histsize = instance["historySize"] if instance["historySize"] else self.config['DefaultHistorySize']
-        snaps = self.getInstanceRootVolumeSnapshots(instance['instance'], True)
+        snaps = self.getInstanceRootVolumeSnapshots(instance, True)
         name = [i["Value"] for i in instance['instance'].tags if i["Key"] == "Name"][0]
 
         # If there are snaps then get the latest one, if not then just take one
