@@ -186,7 +186,7 @@ class Shutter(object):
         snapshots = self.getInstanceRootVolumeSnapshots(instance, True)
         histsize = instance["historySize"] if instance["historySize"] else self.config['DefaultHistorySize']
         if len(snapshots) > histsize:
-            to_delete = snapshots[:histsize]
+            to_delete = snapshots[:histsize-1]
             for snap in to_delete:
                 snap.delete()
 
