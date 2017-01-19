@@ -184,6 +184,7 @@ class Shutter(object):
         :param instance: The EC2 instance to prune the snapshots of
         """
         snapshots = self.getInstanceRootVolumeSnapshots(instance, True)
+        snapshots.sort(key=lambda s: s.meta.data['StartTime'])
         histsize = instance["historySize"] if instance["historySize"] else self.config['DefaultHistorySize']
         if len(snapshots) > histsize:
             to_delete = snapshots[:histsize-1]
@@ -242,6 +243,7 @@ class Shutter(object):
 
         # If there are snaps then get the latest one, if not then just take one
         # as long as the history size isn't 0
+        snaps.sort(key=lambda s: s.meta.data['StartTime'], reverse=True)
         if len(snaps):
             latest = snaps[0]
         elif histsize:
@@ -251,10 +253,12 @@ class Shutter(object):
         bt = latest.meta.data['StartTime']
         if freq == 'daily':
             bt += relativedelta(days=1)
-        if freq == 'weekly':
+        elif freq == 'weekly':
             bt += relativedelta(weeks=1)
-        if freq == 'monthly':
+        elif freq == 'monthly':
             bt += relativedelta(months=1)
+        else:
+            return
 
         # provide a 10 minute time buffer
         if datetime.now().replace(tzinfo=bt.tzinfo) >= bt+relativedelta(minutes=-10):
