@@ -92,6 +92,7 @@ class Shutter(object):
         else:
             log.error("LogLevel config option ({}) is invalid, defaulting to INFO".format(self.config.get("LogLevel")))
 
+        self.session = boto3.Session(profile_name=self.profile)
         default_region = self.config.get("DefaultAWSRegion")
         self.profile = self.config.get("DefaultAWSProfile", "default")
         self.initRegion(default_region)
@@ -165,8 +166,7 @@ class Shutter(object):
         if self.ec2.get(region, None):
             log.debug("Region {} has already been initialized".format(region))
             return
-        s = boto3.Session(profile_name=self.profile)
-        self.ec2[region] = s.resource('ec2', region_name=region)
+        self.ec2[region] = self.session.resource('ec2', region_name=region)
 
     def getInstanceRootVolumeSnapshots(self, instance, shutter_only=False):
         """
@@ -322,3 +322,7 @@ class Shutter(object):
             ]
         ))
         return q[0] if len(q) else None
+
+    def copySnapshot(self, snap, source, dest):
+        client = self.session.client('ec2', region_name=dest)
+        client.copy_snapshot(SourceSnapshotId=snap.id, SourceRegion=source, Description=snap.description)
