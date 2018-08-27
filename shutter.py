@@ -1,9 +1,13 @@
 import logging
 import yaml
 import boto3
+import re
 from os import path
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
+from requests.utils import CaseInsensitiveDict
+
+SETTING_TAG = "Shutter-"
 
 logging.basicConfig(level=logging.INFO, filename="shutter.log",
                     format="%(asctime)s - %(name)s [%(levelname)s] - %(message)s",
@@ -12,11 +16,15 @@ logging.basicConfig(level=logging.INFO, filename="shutter.log",
 log = logging.getLogger(__name__)
 
 
-class Instance(dict):
+class Instance(CaseInsensitiveDict):
 
-    def __init__(self, instance, *args, **kwargs):
+    def __init__(self, instance, region, defaults={}):
+        super(Instance, self).__init__(defaults)
+        self.region = region
         self.instance = instance
-        super(Instance, self).__init__(*args, **kwargs)
+
+        conf_tags = { k[k.startswith(SETTING_TAG) and len(SETTING_TAG):]: v.lower() for k, v in self.tags.items() if re.match(SETTING_TAG+"*", k) }
+        self.update(conf_tags)
 
     @property
     def name(self):
@@ -25,6 +33,9 @@ class Instance(dict):
     @property
     def tags(self):
         return {t["Key"]: t["Value"] for t in self.instance.tags}
+
+    def __repr__(self):
+        return "<{} in {}>".format((self.name or self.instance.id), self.region)
 
     def getVolume(self, volume):
         """
@@ -81,60 +92,36 @@ class Shutter(object):
     :type instance_file: string
     :param instance_file: the path to the instance file if different than config.yml
     """
-    def __init__(self, config_file='config.yml', instance_file='instances.yml'):
+    def __init__(self, config_file):
+
+        if not config_file:
+            raise Exception("No config file specified.")
+
         self.ec2 = dict()
         self.loadConfig(config_file)
 
         # Default log level is INFO (from above)
-        loglevel = getattr(logging, self.config.get("LogLevel", "INFO").upper())
+        loglevel = getattr(logging, self.config.get("loglevel", "INFO").upper())
         if isinstance(loglevel, int):
             log.setLevel(loglevel)
         else:
-            log.error("LogLevel config option ({}) is invalid, defaulting to INFO".format(self.config.get("LogLevel")))
+            log.warning("LogLevel config option ({}) is invalid, defaulting to INFO".format(self.config.get("LogLevel")))
 
+        regions = self.config.get("Regions")
+        self.profile = self.config.get("AWSProfile", "default")
         self.session = boto3.Session(profile_name=self.profile)
-        default_region = self.config.get("DefaultAWSRegion")
-        self.profile = self.config.get("DefaultAWSProfile", "default")
-        self.initRegion(default_region)
-        self.loadInstances(instance_file)
+        for r in regions:
+            self.initRegion(r)
+        self.populateInstances()
 
-    def loadInstances(self, instance_file):
-        """
-        Uses the yaml parser to import instances into the object
-
-        :type instance_file: string
-        :param instance_file: The yaml file containing instance details
-
-        :rtype: boolean
-        :return: False if the file does not exist, True otherwise
-        """
+    def populateInstances(self):
         self.instances = []
-        if not path.exists(instance_file):
-            log.error("{} not found".format(instance_file))
-            return False
-        with open(instance_file) as f:
-            instances = yaml.load(f.read())
-
-        # get instance by id or Name tag
-        for name, values in instances.items():
-            region = values.get('AWSRegion', self.config["DefaultAWSRegion"])
-            if 'instanceId' in values:
-                instance = Instance(self.getInstanceById(values['instanceId'], region), values)
-            elif 'instanceName' in values:
-                instance = Instance(self.getInstanceByName(values['instanceName'], region), values)
-            else:
-                log.error("{} does not have an identifier (name or id)".format(name))
-                continue
-            if not instance.instance:
-                if 'instanceId' in values:
-                    log.error("An instance with ID {} in region {} was not found".format(values['instanceId'], region))
-                elif 'instanceName' in values:
-                    log.error("An instance with Name {} in region {} was not found".format(values['instanceName'], region))
-                continue
-
-            self.initRegion(region)
-            self.instances.append(instance)
-        return True
+        filt = lambda x: x['Key'] == SETTING_TAG+"Enable" and x['Value'].lower() in ['true', 'yes']
+        for region, session in self.ec2.items():
+            instances = list(session.instances.filter(Filters=[{"Name": "tag:{}Enable".format(SETTING_TAG), "Values": ["*"]}]))
+            for i in instances:
+                if filter(filt, i.tags):
+                    self.instances.append(Instance(i, region, self.config["Default"]))
 
     def loadConfig(self, config_file):
         """
@@ -168,24 +155,18 @@ class Shutter(object):
             return
         self.ec2[region] = self.session.resource('ec2', region_name=region)
 
-    def getInstanceRootVolumeSnapshots(self, instance, shutter_only=False):
+    def getInstanceRootVolumeSnapshots(self, instance):
         """
         Retrieves and sorts device snapshots for an instance
 
         :type instance: ec2.Instance
         :param instance: The EC2 instance object to get snapshots for
-        :type shutter_only: boolean
-        :param shutter_only: Enable a check to retrieve shutter snapshots only.
-                             Needed for automatic snapshot management without
-                             deleting non-shutter managed snapshots
 
         :rtype: list
         :return: list of snapshots for the root volume of the given EC2 instance
         """
-        devname = instance.get('rootDevice', self.config.get("DefaultRootDevice"))
+        devname = instance.get('rootdevice')
         s = instance.getVolumeSnapshots(devname)
-        if shutter_only:
-            s = [i for i in s if "Shutter" in i.description]
         s.sort(key=lambda i: i.meta.data["StartTime"])
         return s
 
@@ -197,12 +178,13 @@ class Shutter(object):
         :type instance: ec2.Instance
         :param instance: The EC2 instance to prune the snapshots of
         """
-        snapshots = self.getInstanceRootVolumeSnapshots(instance, True)
+        snapshots = self.getInstanceRootVolumeSnapshots(instance)
         snapshots.sort(key=lambda s: s.meta.data['StartTime'])
-        histsize = instance.get("historySize", self.config['DefaultHistorySize'])
+        histsize = int(instance.get("historysize"))
         if len(snapshots) > histsize:
             to_delete = snapshots[:histsize-1]
             for snap in to_delete:
+                log.debug("Deleting snapshot " + snap.id)
                 snap.delete()
 
     def run(self):
@@ -223,7 +205,7 @@ class Shutter(object):
                          from the instances file
         """
         self.snapshotInstanceWithFrequency(instance)
-        prune = instance.get("deleteOldSnapshots", self.config["DefaultDeleteOldSnapshots"])
+        prune = instance.get("deleteoldsnapshots")
         if prune:
             self.pruneSnapshots(instance)
 
@@ -235,7 +217,7 @@ class Shutter(object):
         :param instance: Contains the ec2.Instance object as well as config data
                          from the instances file
         """
-        devname = instance.get('rootDevice', self.config.get("DefaultRootDevice"))
+        devname = instance.get('rootdevice')
         desc = "Shutter automatically managed snapshot of {} ({})".format(instance.name, instance.instance.id)
         volume = instance.getVolume(devname)
         if not volume:
@@ -252,9 +234,9 @@ class Shutter(object):
         :param instance: Contains the ec2.Instance object as well as config data
                          from the instances file
         """
-        freq = instance.get("frequency", self.config['DefaultFrequency'])
-        histsize = instance.get("historySize", self.config['DefaultHistorySize'])
-        snaps = self.getInstanceRootVolumeSnapshots(instance, True)
+        freq = instance.get("frequency")
+        histsize = instance.get("historysize")
+        snaps = self.getInstanceRootVolumeSnapshots(instance)
 
         # If there are snaps then get the latest one, if not then just take one
         # as long as the history size isn't 0
@@ -262,6 +244,7 @@ class Shutter(object):
         if len(snaps):
             latest = snaps[0]
         elif histsize:
+            log.debug("Snapshotting " + instance.name)
             self.snapshotInstance(instance)
             return
 
@@ -277,6 +260,7 @@ class Shutter(object):
 
         # provide a 10 minute time buffer
         if datetime.now().replace(tzinfo=bt.tzinfo) >= bt+relativedelta(minutes=-10):
+            log.debug("Snapshotting " + instance.name)
             self.snapshotInstance(instance)
         else:
             log.debug("Not snaphotting {} ({}) last snapshot too new with frequency {}".format(instance.name, instance.instance.id, freq))

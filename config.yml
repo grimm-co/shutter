@@ -1,7 +1,9 @@
-DefaultAWSRegion: us-east-1
-DefaultAWSProfile: shutter
-DefaultFrequency: weekly
-DefaultHistorySize: 2
-DefaultDeleteOldSnapshots: no
-DefaultRootDevice: /dev/sda
+Default:
+    Frequency: weekly
+    HistorySize: 2
+    DeleteOldSnapshots: yes
+    RootDevice: /dev/sda1
+AWSProfile: personal
 LogLevel: error
+Regions:
+    - us-east-1
