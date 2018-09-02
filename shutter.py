@@ -81,6 +81,18 @@ class Instance(CaseInsensitiveDict):
         else:
             return list(volume.snapshots.all())
 
+    def getRootVolumeSnapshots(self):
+        """
+        Retrieves and sorts device snapshots for an instance
+
+        :rtype: list
+        :return: list of snapshots for the root volume of the given EC2 instance
+        """
+        devname = self.get('rootdevice')
+        s = self.getVolumeSnapshots(devname)
+        s.sort(key=lambda i: i.meta.data["StartTime"])
+        return s
+
 
 class Shutter(object):
     """
@@ -155,21 +167,6 @@ class Shutter(object):
             return
         self.ec2[region] = self.session.resource('ec2', region_name=region)
 
-    def getInstanceRootVolumeSnapshots(self, instance):
-        """
-        Retrieves and sorts device snapshots for an instance
-
-        :type instance: ec2.Instance
-        :param instance: The EC2 instance object to get snapshots for
-
-        :rtype: list
-        :return: list of snapshots for the root volume of the given EC2 instance
-        """
-        devname = instance.get('rootdevice')
-        s = instance.getVolumeSnapshots(devname)
-        s.sort(key=lambda i: i.meta.data["StartTime"])
-        return s
-
     def pruneSnapshots(self, instance):
         """
         Identifies and deletes old snapshots based on a history size. Only deletes
@@ -178,7 +175,7 @@ class Shutter(object):
         :type instance: ec2.Instance
         :param instance: The EC2 instance to prune the snapshots of
         """
-        snapshots = self.getInstanceRootVolumeSnapshots(instance)
+        snapshots = instance.getRootVolumeSnapshots()
         snapshots.sort(key=lambda s: s.meta.data['StartTime'])
         histsize = int(instance.get("historysize"))
         if len(snapshots) > histsize:
@@ -225,6 +222,20 @@ class Shutter(object):
         else:
             volume.create_snapshot(Description=desc)
 
+    @staticmethod
+    def _timeWithinFrequency(time, frequency, jitter_minutes=10):
+        frequency = frequency.lower()
+        if frequency == 'daily':
+            time += relativedelta(days=1)
+        elif frequency == 'weekly':
+            time += relativedelta(weeks=1)
+        elif frequency == 'monthly':
+            time += relativedelta(months=1)
+        else:
+            log.error("Frequency of {} is invalid!".format(frequency))
+            return False
+        return datetime.now().replace(tzinfo=time.tzinfo) >= time+relativedelta(minutes=-jitter_minutes)
+
     def snapshotInstanceWithFrequency(self, instance):
         """
         Snapshots the given instance's root volume if it needs to be snapshotted
@@ -236,36 +247,27 @@ class Shutter(object):
         """
         freq = instance.get("frequency")
         histsize = instance.get("historysize")
-        snaps = self.getInstanceRootVolumeSnapshots(instance)
+        snaps = instance.getRootVolumeSnapshots()
 
         # If there are snaps then get the latest one, if not then just take one
         # as long as the history size isn't 0
         snaps.sort(key=lambda s: s.meta.data['StartTime'], reverse=True)
         if len(snaps):
             latest = snaps[0]
-        elif histsize:
+        elif int(histsize) > 0:
             log.debug("Snapshotting " + instance.name)
             self.snapshotInstance(instance)
             return
 
         bt = latest.meta.data['StartTime']
-        if freq == 'daily':
-            bt += relativedelta(days=1)
-        elif freq == 'weekly':
-            bt += relativedelta(weeks=1)
-        elif freq == 'monthly':
-            bt += relativedelta(months=1)
-        else:
-            return
 
-        # provide a 10 minute time buffer
-        if datetime.now().replace(tzinfo=bt.tzinfo) >= bt+relativedelta(minutes=-10):
+        if Shutter._timeWithinFrequency(bt, freq):
             log.debug("Snapshotting " + instance.name)
             self.snapshotInstance(instance)
         else:
             log.debug("Not snaphotting {} ({}) last snapshot too new with frequency {}".format(instance.name, instance.instance.id, freq))
 
-    def getInstanceById(self, id, region):
+    def _getInstanceById(self, id, region):
         """
         Gets an EC2 instance by its id
 
@@ -286,7 +288,7 @@ class Shutter(object):
         ))
         return q[0] if len(q) else None
 
-    def getInstanceByName(self, name, region):
+    def _getInstanceByName(self, name, region):
         """
         Gets an EC2 instance by its name tag
 
