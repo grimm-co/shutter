@@ -93,6 +93,24 @@ class Instance(CaseInsensitiveDict):
         s.sort(key=lambda i: i.meta.data["StartTime"])
         return s
 
+    def snapshot(self, desc=None, tags=None):
+        """
+        Snapshots the given instance's root volume
+
+        :rtype ec2.Snapshot
+        :return: The snapshot if one is taken or None
+        """
+        if tags:
+            tags = [{'Key': k, 'Value': v} for k, v in tags.items()]
+            ts = [{'ResourceType': 'snapshot', "Tags": tags}]
+        devname = self.get('rootdevice')
+        volume = self.getVolume(devname)
+        if not volume:
+            log.error("Volume {} not found for instance").format(devname, self.name)
+            return None
+        else:
+            return volume.create_snapshot(Description=desc, TagSpecifications=ts)
+
 
 class Shutter(object):
     """
@@ -206,21 +224,6 @@ class Shutter(object):
         if prune:
             self.pruneSnapshots(instance)
 
-    def snapshotInstance(self, instance):
-        """
-        Snapshots the given instance's root volume
-
-        :type instance: dict
-        :param instance: Contains the ec2.Instance object as well as config data
-                         from the instances file
-        """
-        devname = instance.get('rootdevice')
-        desc = "Shutter automatically managed snapshot of {} ({})".format(instance.name, instance.instance.id)
-        volume = instance.getVolume(devname)
-        if not volume:
-            log.error("Volume {} not found for instance").format(devname, instance.name)
-        else:
-            volume.create_snapshot(Description=desc)
 
     @staticmethod
     def _timeWithinFrequency(time, frequency, jitter_minutes=10):
@@ -248,6 +251,7 @@ class Shutter(object):
         freq = instance.get("frequency")
         histsize = instance.get("historysize")
         snaps = instance.getRootVolumeSnapshots()
+        desc = "Shutter automatically managed snapshot of {} ({})".format(instance.name, instance.instance.id)
 
         # If there are snaps then get the latest one, if not then just take one
         # as long as the history size isn't 0
@@ -256,14 +260,14 @@ class Shutter(object):
             latest = snaps[0]
         elif int(histsize) > 0:
             log.debug("Snapshotting " + instance.name)
-            self.snapshotInstance(instance)
+            instance.snapshot(desc)
             return
 
         bt = latest.meta.data['StartTime']
 
         if Shutter._timeWithinFrequency(bt, freq):
             log.debug("Snapshotting " + instance.name)
-            self.snapshotInstance(instance)
+            instance.snapshot(desc)
         else:
             log.debug("Not snaphotting {} ({}) last snapshot too new with frequency {}".format(instance.name, instance.instance.id, freq))
 
@@ -309,6 +313,28 @@ class Shutter(object):
         ))
         return q[0] if len(q) else None
 
-    def copySnapshot(self, snap, source, dest):
+    def copySnapshot(self, snap, source, dest, wait=True):
+        self.initRegion(dest)
         client = self.session.client('ec2', region_name=dest)
-        client.copy_snapshot(SourceSnapshotId=snap.id, SourceRegion=source, Description=snap.description)
+
+        while wait and snap.state != 'completed':
+            snap.reload()
+            if snap.state == 'error':
+                log.error("Failed to complete snapshot, not copying")
+                return None
+
+        resp = client.copy_snapshot(SourceSnapshotId=snap.id, SourceRegion=source, Description=snap.description)
+
+        if resp['ResponseMetadata']['HTTPStatusCode'] != 200:
+            log.error("Copy failed")
+
+        # get and return the actual snapshot object
+        filt = [{"Name": "snapshot-id", "Values": [resp["SnapshotId"]]}]
+        snapCopy = list(self.ec2[dest].snapshots.filter(Filters=filt))[0]
+        if not snapCopy or snapCopy.state == 'error':
+            log.error("Copy failed")
+            return None
+
+        # let's copy the tags from the other snapshot too
+        snapCopy.create_tags(Tags=snap.tags)
+        return snapCopy
