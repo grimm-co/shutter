@@ -3,6 +3,10 @@ Default:
     HistorySize: 2
     DeleteOldSnapshots: yes
     RootDevice: /dev/sda1
+    OffsiteBackup: no
+    OffsiteRegion: us-east-2
+    OffsiteFrequency: weekly
+    OffsiteHistorySize: 2
 AWSProfile: personal
 LogLevel: error
 Regions:

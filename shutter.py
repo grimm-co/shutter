@@ -24,6 +24,18 @@ class Instance(CaseInsensitiveDict):
         self.instance = instance
 
         conf_tags = { k[k.startswith(SETTING_TAG) and len(SETTING_TAG):]: v.lower() for k, v in self.tags.items() if re.match(SETTING_TAG+"*", k) }
+
+        for k, v in conf_tags.items():
+            # keep types consistent for overriden config options
+            if self.get(k, None) != None:
+                if isinstance(self[k], bool):
+                    if v.lower() in ["true", "yes"]:
+                        conf_tags[k] = True
+                    else:
+                        conf_tags[k] = False
+                else:
+                    conf_tags[k] = type(self[k])(v)
+
         self.update(conf_tags)
 
     @property
@@ -83,7 +95,7 @@ class Instance(CaseInsensitiveDict):
 
     def getRootVolumeSnapshots(self):
         """
-        Retrieves and sorts device snapshots for an instance
+        Retrieves and sorts device snapshots for an instance by start time
 
         :rtype: list
         :return: list of snapshots for the root volume of the given EC2 instance
@@ -146,6 +158,7 @@ class Shutter(object):
 
     def populateInstances(self):
         self.instances = []
+        # some leeway in case
         filt = lambda x: x['Key'] == SETTING_TAG+"Enable" and x['Value'].lower() in ['true', 'yes']
         for region, session in self.ec2.items():
             instances = list(session.instances.filter(Filters=[{"Name": "tag:{}Enable".format(SETTING_TAG), "Values": ["*"]}]))
@@ -185,7 +198,7 @@ class Shutter(object):
             return
         self.ec2[region] = self.session.resource('ec2', region_name=region)
 
-    def pruneSnapshots(self, instance):
+    def pruneSnapshots(self, snapshots, histsize):
         """
         Identifies and deletes old snapshots based on a history size. Only deletes
         snapshots managed by Shutter
@@ -193,9 +206,6 @@ class Shutter(object):
         :type instance: ec2.Instance
         :param instance: The EC2 instance to prune the snapshots of
         """
-        snapshots = instance.getRootVolumeSnapshots()
-        snapshots.sort(key=lambda s: s.meta.data['StartTime'])
-        histsize = int(instance.get("historysize"))
         if len(snapshots) > histsize:
             to_delete = snapshots[:histsize-1]
             for snap in to_delete:
@@ -219,11 +229,20 @@ class Shutter(object):
         :param instance: Contains the ec2.Instance object as well as config data
                          from the instances file
         """
-        self.snapshotInstanceWithFrequency(instance)
+        snap = self.snapshotInstanceWithFrequency(instance)
         prune = instance.get("deleteoldsnapshots")
+        if instance["offsitebackup"] and snap:
+            self.makeOffsiteSnapshotWithFrequency(instance, snap)
         if prune:
-            self.pruneSnapshots(instance)
+            # prune main snapshots
+            snapshots = instance.getRootVolumeSnapshots()
+            histsize = instance.get("historysize")
+            self.pruneSnapshots(snapshots, histsize)
 
+            if instance["offsitebackup"]:
+                snapshots = self.getInstanceOffsiteBackupSnapshots(instance)
+                histsize = instance.get("offsitehistorysize")
+                self.pruneSnapshots(snapshots, histsize)
 
     @staticmethod
     def _timeWithinFrequency(time, frequency, jitter_minutes=10):
@@ -252,24 +271,24 @@ class Shutter(object):
         histsize = instance.get("historysize")
         snaps = instance.getRootVolumeSnapshots()
         desc = "Shutter automatically managed snapshot of {} ({})".format(instance.name, instance.instance.id)
+        tags = {SETTING_TAG+"InstanceId": instance.instance.id}
 
         # If there are snaps then get the latest one, if not then just take one
         # as long as the history size isn't 0
-        snaps.sort(key=lambda s: s.meta.data['StartTime'], reverse=True)
         if len(snaps):
-            latest = snaps[0]
-        elif int(histsize) > 0:
+            latest = snaps[-1]
+        elif histsize > 0:
             log.debug("Snapshotting " + instance.name)
-            instance.snapshot(desc)
-            return
+            return instance.snapshot(desc, tags)
 
         bt = latest.meta.data['StartTime']
 
         if Shutter._timeWithinFrequency(bt, freq):
             log.debug("Snapshotting " + instance.name)
-            instance.snapshot(desc)
+            return instance.snapshot(desc, tags)
         else:
             log.debug("Not snaphotting {} ({}) last snapshot too new with frequency {}".format(instance.name, instance.instance.id, freq))
+            return None
 
     def _getInstanceById(self, id, region):
         """
@@ -327,6 +346,7 @@ class Shutter(object):
 
         if resp['ResponseMetadata']['HTTPStatusCode'] != 200:
             log.error("Copy failed")
+            return None
 
         # get and return the actual snapshot object
         filt = [{"Name": "snapshot-id", "Values": [resp["SnapshotId"]]}]
@@ -338,3 +358,37 @@ class Shutter(object):
         # let's copy the tags from the other snapshot too
         snapCopy.create_tags(Tags=snap.tags)
         return snapCopy
+
+    def getInstanceOffsiteBackupSnapshots(self, instance):
+        region = instance.get("OffsiteRegion")
+        self.initRegion(region)
+        q = list(self.ec2[region].snapshots.filter(
+            Filters=[
+                {"Name": "tag:{}InstanceId".format(SETTING_TAG),
+                 "Values": [instance.instance.id]}
+            ]
+        ))
+        q.sort(key=lambda i: i.meta.data["StartTime"])
+        return q
+
+    def makeOffsiteSnapshot(self, instance, snap):
+        log.debug("Copying snapshot of {} from {} to {}" + instance.name, instance.region, instance.get("offsiteregion"))
+        return self.copySnapshot(snap, instance.region, instance.get("offsiteregion"))
+
+    def makeOffsiteSnapshotWithFrequency(self, instance, snap):
+        freq = instance.get("offsitefrequency")
+        histsize = instance.get("offsitehistorysize")
+        offsite_snaps = self.getInstanceOffsiteBackupSnapshots(instance)
+
+        if len(offsite_snaps):
+            latest = offsite_snaps[-1]
+        elif histsize > 0:
+            return self.makeOffsiteSnapshot(instance, snap)
+
+        bt = latest.meta.data['StartTime']
+
+        if Shutter._timeWithinFrequency(bt, freq):
+            return self.makeOffsiteSnapshot(instance, snap)
+        else:
+            log.debug("Not copying {} ({}) last offsite snapshot too new with frequency {}".format(instance.name, instance.instance.id, freq))
+            return None
