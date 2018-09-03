@@ -248,8 +248,11 @@ class Shutter(object):
         """
         if concurrent:
             with futures.ThreadPoolExecutor(max_workers=10) as e:
-                for i in self.instances:
-                    e.submit(self.runOne, i)
+                f = [e.submit(self.runOne, i) for i in self.instances]
+
+            # wait for all futures to complete
+            for f in futures.as_completed(f):
+                pass
         else:
             for i in self.instances:
                 self.runOne(i)
