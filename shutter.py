@@ -391,7 +391,7 @@ class Shutter(object):
         ))
         return q[0] if len(q) else None
 
-    def copySnapshot(self, snap, source, dest, wait=True):
+    def copySnapshot(self, snap, source, dest, encrypt=False, kmsid=None, wait=True):
         """
         Copies a snapshot from one region to another
 
@@ -401,6 +401,10 @@ class Shutter(object):
         :param source: source region
         :type dest: str
         :param dest: destination region
+        :type encrypt: bool
+        :param encrypt: whether to encrypt the snapshot or not. must also have a valid kmsid.
+        :type kmsid: str
+        :param kmsid: aws kms key id. aliases will not work.
         :type wait: bool
         :param wait: wait for the snapshot to finish or error before proceeding
 
@@ -410,14 +414,13 @@ class Shutter(object):
         self.initRegion(dest)
         client = self.session.client('ec2', region_name=dest)
 
-        while wait and snap.state != 'completed':
-            snap.reload()
+        if wait and snap.state != 'completed':
+            snap.wait_until_completed()
             if snap.state == 'error':
                 log.error("Failed to complete snapshot, not copying")
                 return None
-            sleep(1)
 
-        resp = client.copy_snapshot(SourceSnapshotId=snap.id, SourceRegion=source, Description=snap.description)
+        resp = client.copy_snapshot(SourceSnapshotId=snap.id, SourceRegion=source, Description=snap.description, Encrypted=encrypt, KmsKeyId=kmsid)
 
         if resp['ResponseMetadata']['HTTPStatusCode'] != 200:
             log.error("Copy failed")
@@ -431,7 +434,8 @@ class Shutter(object):
             return None
 
         # let's copy the tags from the other snapshot too
-        snapCopy.create_tags(Tags=snap.tags)
+        if snap.tags:
+            snapCopy.create_tags(Tags=snap.tags)
         return snapCopy
 
     def getInstanceOffsiteBackupSnapshots(self, instance):
@@ -469,7 +473,7 @@ class Shutter(object):
         :return: the new snapshot copy
         """
         log.debug("Copying snapshot of {} from {} to {}" + instance.name, instance.region, instance.get("offsiteregion"))
-        return self.copySnapshot(snap, instance.region, instance.get("offsiteregion"))
+        return self.copySnapshot(snap, instance.region, instance.get("offsiteregion"), instance.get("offsiteencyrpt"), instance.get("offsitekmsid"))
 
     def makeOffsiteSnapshotWithFrequency(self, instance, snap):
         """

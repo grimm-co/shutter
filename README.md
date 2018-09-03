@@ -23,6 +23,9 @@ Defaults:
 | OffsiteRegion             | The region to copy offsite backups to                          | string                                      |
 | OffsiteFrequency          | The frequency at which instances are backed up offsite         | string                                      |
 | OffsiteHistorySize        | The size of the offsite backup history                         | daily, weekly, monthly                      |
+| OffsiteEncrypt            | Set to True to enable encryption of all offsite snapshots      | boolean                                     |
+| OffsiteKmsId              | The IAM KMS key ID to encrypt with. No aliases allowed         | daily, weekly, monthly                      |
+
 
 
 Defaults can be overridden with AWS tags. Ex. to override DefaultFrequency just make a tag on the instance Shutter-DefaultFrequency and set it to the value you want. Shutter will pick it up!

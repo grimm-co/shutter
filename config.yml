@@ -7,6 +7,8 @@ Default:
     OffsiteRegion: us-east-2
     OffsiteFrequency: weekly
     OffsiteHistorySize: 2
+    OffsiteEncrypt: yes
+    OffsiteKmsId:  'arn:aws:kms:us-east-2:647537484465:key/6f473ba3-4743-37bc-dd12-3474b3c4aacb'
 AWSProfile: personal
 LogLevel: error
 Regions:
