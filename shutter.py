@@ -248,7 +248,9 @@ class Shutter(object):
         needs to be created and also prune old snapshots if required
         """
         if concurrent:
-            with futures.ThreadPoolExecutor(max_workers=10) as e:
+            # only use 5 here. the maximum number of concurrent snapshot copy
+            # operations is 5. this limit is set by amazon
+            with futures.ThreadPoolExecutor(max_workers=5) as e:
                 f = [e.submit(self.runOne, i) for i in self.instances]
 
             # wait for all futures to complete
@@ -414,11 +416,12 @@ class Shutter(object):
         self.initRegion(dest)
         client = self.session.client('ec2', region_name=dest)
 
-        if wait and snap.state != 'completed':
-            snap.wait_until_completed()
+        while wait and snap.state != 'completed':
+            snap.reload()
             if snap.state == 'error':
                 log.error("Failed to complete snapshot, not copying")
                 return None
+            sleep(5)
 
         resp = client.copy_snapshot(SourceSnapshotId=snap.id, SourceRegion=source, Description=snap.description, Encrypted=encrypt, KmsKeyId=kmsid)
 
@@ -432,6 +435,13 @@ class Shutter(object):
         if not snapCopy or snapCopy.state == 'error':
             log.error("Copy failed")
             return None
+
+        while wait and snapCopy.state != 'completed':
+            snapCopy.reload()
+            if snapCopy.state == 'error':
+                log.error("Failed to complete copy")
+                return None
+            sleep(5)
 
         # let's copy the tags from the other snapshot too
         if snap.tags:
