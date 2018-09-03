@@ -3,6 +3,7 @@ import yaml
 import boto3
 import re
 from os import path
+from time import sleep
 from datetime import datetime
 from concurrent import futures
 from dateutil.relativedelta import relativedelta
@@ -160,7 +161,7 @@ class Shutter(object):
         self.loadConfig(config_file)
 
         # Default log level is INFO (from above)
-        loglevel = getattr(logging, self.config.get("loglevel", "INFO").upper())
+        loglevel = getattr(logging, self.config.get("LogLevel", "INFO").upper())
         if isinstance(loglevel, int):
             log.setLevel(loglevel)
         else:
@@ -414,6 +415,7 @@ class Shutter(object):
             if snap.state == 'error':
                 log.error("Failed to complete snapshot, not copying")
                 return None
+            sleep(1)
 
         resp = client.copy_snapshot(SourceSnapshotId=snap.id, SourceRegion=source, Description=snap.description)
 
