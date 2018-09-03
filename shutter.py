@@ -473,7 +473,7 @@ class Shutter(object):
         :return: the new snapshot copy
         """
         log.debug("Copying snapshot of {} from {} to {}".format(instance.name, instance.region, instance.get("offsiteregion")))
-        return self.copySnapshot(snap, instance.region, instance.get("offsiteregion"), instance.get("offsiteencyrpt"), instance.get("offsitekmsid"))
+        return self.copySnapshot(snap, instance.region, instance.get("offsiteregion"), instance.get("offsiteencrypt"), instance.get("offsitekmsid"))
 
     def makeOffsiteSnapshotWithFrequency(self, instance, snap):
         """
