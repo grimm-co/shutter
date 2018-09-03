@@ -32,4 +32,6 @@ Defaults can be overridden with AWS tags. Ex. to override DefaultFrequency just 
 
 These configuration options are set in [config.yml](config.yml)
 
+You can use the IAM policy in [shutter-policy.json](shutter-policy.json) to only allow access to the specific resources shutter needs to operate. Also, you need to grant the shutter user/role access to use the encryption keys you specify, if you use offsite snapshot encryption.  
+
 Developed with love by Jaime Geiger (@wumb0)
