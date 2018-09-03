@@ -15,10 +15,15 @@ Defaults:
 
 | Option                    | Description                                                    | Valid values or types                       |
 | ------                    | -----------                                                    | ---------------------                       |
-| DefaultFrequency          | The default frequency at which instances are snapshotted       | daily, weekly, monthly                      |
-| DefaultHistorySize        | The number of snapshots to keep before deleting the oldest one | integer                                     |
-| DefaultDeleteOldSnapshots | Debug option for whether to delete old snapshots or not        | boolean                                     |
-| DefaultRootDevice         | The default root device name. Usually /dev/sda1                | string                                      |
+| Frequency                 | The default frequency at which instances are snapshotted       | daily, weekly, monthly                      |
+| HistorySize               | The number of snapshots to keep before deleting the oldest one | integer                                     |
+| DeleteOldSnapshots        | Debug option for whether to delete old snapshots or not        | boolean                                     |
+| RootDevice                | The default root device name. Usually /dev/sda1                | string                                      |
+| OffsiteBackup             | Set to True to enable offsite backups                          | boolean                                     |
+| OffsiteRegion             | The region to copy offsite backups to                          | string                                      |
+| OffsiteFrequency          | The frequency at which instances are backed up offsite         | string                                      |
+| OffsiteHistorySize        | The size of the offsite backup history                         | daily, weekly, monthly                      |
+
 
 Defaults can be overridden with AWS tags. Ex. to override DefaultFrequency just make a tag on the instance Shutter-DefaultFrequency and set it to the value you want. Shutter will pick it up!
 

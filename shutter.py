@@ -7,6 +7,7 @@ from datetime import datetime
 from dateutil.relativedelta import relativedelta
 from requests.utils import CaseInsensitiveDict
 
+# the prefix tag for config settings on instances and snapshots
 SETTING_TAG = "Shutter-"
 
 logging.basicConfig(level=logging.INFO, filename="shutter.log",
@@ -17,6 +18,18 @@ log = logging.getLogger(__name__)
 
 
 class Instance(CaseInsensitiveDict):
+    """
+    Instance objects store configs in a case insensitive dictionary and the 
+    instance and region as attributes. Config attributes are set from defaults
+    passed to __init__ and from instance tags (in that order).
+
+    :type instance: ec2.Instance
+    :param instance: ec2 instance object
+    :type region: str
+    :param region: region that the instance is in
+    :type defaults: dict
+    :param defaults: dictionary to initialize instance config options
+    """
 
     def __init__(self, instance, region, defaults={}):
         super(Instance, self).__init__(defaults)
@@ -51,13 +64,13 @@ class Instance(CaseInsensitiveDict):
 
     def getVolume(self, volume):
         """
-        Queries EC2 for the root device (/dev/sda1 by default) of an instance
+        Queries EC2 for a volume by name
 
-        :type device: string
-        :param device: The root device if not the default of /dev/sda1
+        :type device: str
+        :param device: The requested device name (ex. /dev/sda1)
 
         :rtype: ec2.Volume
-        :return: The root volume, or None
+        :return: The requested volume, or None
         """
         q = list(self.instance.volumes.filter(
             Filters=[
@@ -73,7 +86,7 @@ class Instance(CaseInsensitiveDict):
 
         :type device: ec2.Volume
         :param device: The EC2 volume to get the snapshots for
-        :type status: boolean
+        :type status: str
         :param status: Optional snapshot status. One of ["pending", "completed"]
 
         :rtype: list
@@ -109,6 +122,11 @@ class Instance(CaseInsensitiveDict):
         """
         Snapshots the given instance's root volume
 
+        :type desc: str
+        :param desc: description to assign to the snapshot
+        :type tags: str
+        :param tags: tags to assign to the snapshot
+
         :rtype ec2.Snapshot
         :return: The snapshot if one is taken or None
         """
@@ -130,9 +148,7 @@ class Shutter(object):
     snapshot management tools based on those configs and instances.
 
     :type config_file: string
-    :param config_file: the path to the config file if different than config.yml
-    :type instance_file: string
-    :param instance_file: the path to the instance file if different than config.yml
+    :param config_file: the path to the config file
     """
     def __init__(self, config_file):
 
@@ -157,6 +173,9 @@ class Shutter(object):
         self.populateInstances()
 
     def populateInstances(self):
+        """
+        Get instances that are shutter enabled and store them into an attribute
+        """
         self.instances = []
         # some leeway in case
         filt = lambda x: x['Key'] == SETTING_TAG+"Enable" and x['Value'].lower() in ['true', 'yes']
@@ -170,8 +189,8 @@ class Shutter(object):
         """
         Uses the yaml parser to import configuration options into the object
 
-        :type instance_file: string
-        :param instance_file: The yaml file containing configuration details
+        :type config_file: string
+        :param config_file: The yaml file containing configuration details
 
         :rtype: boolean
         :return: False if the file does not exist, True otherwise
@@ -179,6 +198,7 @@ class Shutter(object):
         if not path.exists(config_file):
             log.error("{} not found".format(config_file))
             return False
+        # TODO: handle issues opening or reading the file
         with open(config_file) as f:
             self.config = yaml.load(f.read())
         return True
@@ -203,14 +223,22 @@ class Shutter(object):
         Identifies and deletes old snapshots based on a history size. Only deletes
         snapshots managed by Shutter
 
-        :type instance: ec2.Instance
-        :param instance: The EC2 instance to prune the snapshots of
+        :type snapshots: list(ec2.Snapshots)
+        :param snapshots: list of snapshots to prune, based on histsize
+        :type histsize: int
+        :param histsize: the number of snapshots that should be kept
+
+        :rtype: int
+        :return: 
         """
+        deleted = 0
         if len(snapshots) > histsize:
             to_delete = snapshots[:histsize-1]
             for snap in to_delete:
                 log.debug("Deleting snapshot " + snap.id)
+                deleted += 1
                 snap.delete()
+        return deleted
 
     def run(self):
         """
@@ -246,6 +274,22 @@ class Shutter(object):
 
     @staticmethod
     def _timeWithinFrequency(time, frequency, jitter_minutes=10):
+        """
+        See if the time is within an acceptable named period with jitter. 
+        Takes the current time and checks it against the past time plus 
+        frequency and jitter.
+
+        :type time: datetime.datetime
+        :param time: base time object
+        :type frequency: str
+        :param frequency: period of time. one of ["daily", "weekly", monthly"]
+        :type jitter_minutes: int
+        :param jitter_minutes: number of minutes of leeway to give
+
+        :rtype: bool
+        :return: True if the time object is within the frequency, False otherwise
+        """
+        # TODO: refactor so it makes more programmatic sense
         frequency = frequency.lower()
         if frequency == 'daily':
             time += relativedelta(days=1)
@@ -266,6 +310,9 @@ class Shutter(object):
         :type instance: dict
         :param instance: Contains the ec2.Instance object as well as config data
                          from the instances file
+        
+        :rtype: ec2.Snapshot
+        :return: the snapshot that was taken, if any, or None
         """
         freq = instance.get("frequency")
         histsize = instance.get("historysize")
@@ -292,6 +339,7 @@ class Shutter(object):
 
     def _getInstanceById(self, id, region):
         """
+        @@@ DEPRECATED @@@
         Gets an EC2 instance by its id
 
         :type id: string
@@ -313,6 +361,7 @@ class Shutter(object):
 
     def _getInstanceByName(self, name, region):
         """
+        @@@ DEPRECATED @@@
         Gets an EC2 instance by its name tag
 
         :type name: string
@@ -333,6 +382,21 @@ class Shutter(object):
         return q[0] if len(q) else None
 
     def copySnapshot(self, snap, source, dest, wait=True):
+        """
+        Copies a snapshot from one region to another
+
+        :type snap: ec2.Snapshot
+        :param snap: snapshot to copy
+        :type source: str
+        :param source: source region
+        :type dest: str
+        :param dest: destination region
+        :type wait: bool
+        :param wait: wait for the snapshot to finish or error before proceeding
+
+        :rtype: ec2.Snapshot
+        :return: the copy made, if any, else None
+        """
         self.initRegion(dest)
         client = self.session.client('ec2', region_name=dest)
 
@@ -360,6 +424,16 @@ class Shutter(object):
         return snapCopy
 
     def getInstanceOffsiteBackupSnapshots(self, instance):
+        """
+        Get a list of offsite backup snapshots. Has to be done in this class
+        because the Instance class does not have ec2 regions.
+
+        :type instance: Instance
+        :param instance: instance to get the offsite snapshots of
+
+        :rtype: list(ec2.Snapshot)
+        :return: a list of offsite snapshots managed by shutter
+        """
         region = instance.get("OffsiteRegion")
         self.initRegion(region)
         q = list(self.ec2[region].snapshots.filter(
@@ -372,10 +446,32 @@ class Shutter(object):
         return q
 
     def makeOffsiteSnapshot(self, instance, snap):
+        """
+        Copy a snapshot to the region specified in the instance config
+
+        :type instance: Instance
+        :param instance: instance corresponding to snap
+        :type snap: ec2.Snapshot
+        :param snap: snapshot to copy
+
+        :rtype: ec2.Snapshot
+        :return: the new snapshot copy
+        """
         log.debug("Copying snapshot of {} from {} to {}" + instance.name, instance.region, instance.get("offsiteregion"))
         return self.copySnapshot(snap, instance.region, instance.get("offsiteregion"))
 
     def makeOffsiteSnapshotWithFrequency(self, instance, snap):
+        """
+        Backup a snapshot offsite if it's time
+
+        :type instance: Instance
+        :param instance: instance corresponding to snap
+        :type snap: ec2.Snapshot
+        :param snap: snapshot to copy, if it's time
+
+        :rtype: ec2.Snapshot
+        :return: the new snapshot copy
+        """
         freq = instance.get("offsitefrequency")
         histsize = instance.get("offsitehistorysize")
         offsite_snaps = self.getInstanceOffsiteBackupSnapshots(instance)
