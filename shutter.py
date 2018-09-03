@@ -392,3 +392,8 @@ class Shutter(object):
         else:
             log.debug("Not copying {} ({}) last offsite snapshot too new with frequency {}".format(instance.name, instance.instance.id, freq))
             return None
+
+if __name__ == "__main__":
+    import sys
+    s = Shutter(sys.argv[1])
+    s.run()
