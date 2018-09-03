@@ -137,7 +137,7 @@ class Instance(CaseInsensitiveDict):
         devname = self.get('rootdevice')
         volume = self.getVolume(devname)
         if not volume:
-            log.error("Volume {} not found for instance").format(devname, self.name)
+            log.error("Volume {} not found for instance {}".format(devname, self.name))
             return None
         else:
             return volume.create_snapshot(Description=desc, TagSpecifications=ts)
