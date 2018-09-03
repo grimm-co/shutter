@@ -4,6 +4,7 @@ import boto3
 import re
 from os import path
 from datetime import datetime
+from concurrent import futures
 from dateutil.relativedelta import relativedelta
 from requests.utils import CaseInsensitiveDict
 
@@ -240,13 +241,18 @@ class Shutter(object):
                 snap.delete()
         return deleted
 
-    def run(self):
+    def run(self, concurrent=True):
         """
         For all valid instances from the instances file, check if a new snapshot
         needs to be created and also prune old snapshots if required
         """
-        for i in self.instances:
-            self.runOne(i)
+        if concurrent:
+            with futures.ThreadPoolExecutor(max_workers=10) as e:
+                for i in self.instances:
+                    e.submit(self.runOne, i)
+        else:
+            for i in self.instances:
+                self.runOne(i)
 
     def runOne(self, instance):
         """
