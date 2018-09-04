@@ -24,7 +24,7 @@ Defaults:
 | OffsiteFrequency          | The frequency at which instances are backed up offsite         | string                                      |
 | OffsiteHistorySize        | The size of the offsite backup history                         | daily, weekly, monthly                      |
 | OffsiteEncrypt            | Set to True to enable encryption of all offsite snapshots      | boolean                                     |
-| OffsiteKmsId              | The IAM KMS key ID to encrypt with. No aliases allowed         | daily, weekly, monthly                      |
+| OffsiteKmsId              | The IAM KMS key ID to encrypt with. No aliases allowed         | string                                      |
 
 
 
